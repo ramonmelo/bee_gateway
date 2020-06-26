@@ -1,1 +1,1 @@
-# bee_gateway
+# InovaBee Gateway
