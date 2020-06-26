@@ -9,6 +9,10 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+#include <queue>
+
+#include "Packet.h"
+
 //define the pins used by the LoRa transceiver module
 #define SCK 5
 #define MISO 19
@@ -29,9 +33,15 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
+#define DELAY 30 * 1000 // 30 seg
+
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
 
-String LoRaData;
+char id[8];
+unsigned long lastUpdate = 0;
+std::queue<InovaBee::Packet> stack;
+
+void onReceive(int packetSize);
 
 void setup()
 {
@@ -77,41 +87,101 @@ void setup()
 	display.setCursor(0, 10);
 	display.println("LoRa Initializing OK!");
 	display.display();
+
+	// register the receive callback
+	LoRa.onReceive(onReceive);
+
+	// put the radio into receive mode
+	LoRa.receive();
+
+	lastUpdate = millis();
+}
+
+void onReceive(int packetSize)
+{
+	if (packetSize == 10)
+	{
+		LoRa.readBytes(id, 7);
+
+		byte v1 = LoRa.read();
+		byte v2 = LoRa.read();
+		byte v3 = LoRa.read();
+
+		InovaBee::Packet pack;
+
+		pack.deviceID = String(id);
+		pack.internalTemp = v1;
+		pack.externalTemp = v2;
+		pack.humidity = v3;
+
+		stack.push(pack);
+
+		Serial.println("new msg");
+	}
 }
 
 void loop()
 {
-	//try to parse packet
-	int packetSize = LoRa.parsePacket();
-	if (packetSize)
+	if (lastUpdate < millis())
 	{
-		//received a packet
-		Serial.print("Received packet ");
-
-		//read packet
-		while (LoRa.available())
+		Serial.print("sending msgs: ");
+		Serial.println(stack.size());
+		
+		while (stack.empty() == false)
 		{
-			LoRaData = LoRa.readString();
-			Serial.print(LoRaData);
+			InovaBee::Packet pack = stack.front();
+
+			Serial.println(pack.deviceID);
+			Serial.println(pack.internalTemp);
+			Serial.println(pack.externalTemp);
+			Serial.println(pack.humidity);
+
+			stack.pop();
 		}
 
-		//print RSSI of packet
-		int rssi = LoRa.packetRssi();
-		Serial.print(" with RSSI ");
-		Serial.println(rssi);
-
-		// Dsiplay information
-		display.clearDisplay();
-		display.setCursor(0, 0);
-		display.print("LORA RECEIVER");
-		display.setCursor(0, 20);
-		display.print("Received packet:");
-		display.setCursor(0, 30);
-		display.print(LoRaData);
-		display.setCursor(0, 40);
-		display.print("RSSI:");
-		display.setCursor(30, 40);
-		display.print(rssi);
-		display.display();
+		lastUpdate = millis() + DELAY;
 	}
+
+	//try to parse packet
+	// int packetSize = LoRa.parsePacket();
+	// if (packetSize)
+	// {
+	// //received a packet
+	// Serial.print("Received packet ");
+
+	// int len = LoRa.available();
+
+	// if (len > 0)
+	// {
+	// 	byte *buffer = new byte[len];
+	// 	LoRa.readBytes(buffer, len);
+
+	// 	for (size_t i = 0; i < len; i++)
+	// 	{
+	// 		Serial.print("Value ");
+	// 		Serial.print(i);
+	// 		Serial.print(" : ");
+	// 		Serial.println(buffer[i]);
+	// 	}
+	// }
+
+	// //print RSSI of packet
+	// int rssi = LoRa.packetRssi();
+	// Serial.print(" with RSSI ");
+	// Serial.println(rssi);
+
+	// // Dsiplay information
+	// display.clearDisplay();
+	// display.setCursor(0, 0);
+	// display.print("LORA RECEIVER");
+	// display.setCursor(0, 20);
+	// display.print("Received packet:");
+	// display.setCursor(0, 30);
+	// display.print(LoRaData);
+	// display.setCursor(0, 40);
+	// display.print("RSSI:");
+	// display.setCursor(30, 40);
+	// display.print(rssi);
+	// display.display();
+	// }
 }
