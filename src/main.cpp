@@ -159,47 +159,4 @@ void loop()
 
 		lastUpdate = millis() + DELAY;
 	}
-
-	//try to parse packet
-	// int packetSize = LoRa.parsePacket();
-	// if (packetSize)
-	// {
-	// //received a packet
-	// Serial.print("Received packet ");
-
-	// int len = LoRa.available();
-
-	// if (len > 0)
-	// {
-	// 	byte *buffer = new byte[len];
-	// 	LoRa.readBytes(buffer, len);
-
-	// 	for (size_t i = 0; i < len; i++)
-	// 	{
-	// 		Serial.print("Value ");
-	// 		Serial.print(i);
-	// 		Serial.print(" : ");
-	// 		Serial.println(buffer[i]);
-	// 	}
-	// }
-
-	// //print RSSI of packet
-	// int rssi = LoRa.packetRssi();
-	// Serial.print(" with RSSI ");
-	// Serial.println(rssi);
-
-	// // Dsiplay information
-	// display.clearDisplay();
-	// display.setCursor(0, 0);
-	// display.print("LORA RECEIVER");
-	// display.setCursor(0, 20);
-	// display.print("Received packet:");
-	// display.setCursor(0, 30);
-	// display.print(LoRaData);
-	// display.setCursor(0, 40);
-	// display.print("RSSI:");
-	// display.setCursor(30, 40);
-	// display.print(rssi);
-	// display.display();
-	// }
 }
