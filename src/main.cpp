@@ -1,5 +1,23 @@
 #include "Arduino.h"
 
+// AutoConnect
+#if defined(ARDUINO_ARCH_ESP8266)
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+typedef ESP8266WebServer WEBServer;
+#elif defined(ARDUINO_ARCH_ESP32)
+#include <WiFi.h>
+#include <WebServer.h>
+#include <SPIFFS.h>
+typedef WebServer WEBServer;
+#endif
+#include <FS.h>
+#include <AutoConnect.h>
+
+// MQTT
+#include <ArduinoJson.h>
+#include <PubSubClient.h>
+
 //Libraries for LoRa
 #include <SPI.h>
 #include <LoRa.h>
