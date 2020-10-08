@@ -22,13 +22,10 @@ typedef WebServer WEBServer;
 #include <SPI.h>
 #include <LoRa.h>
 
-//Libraries for OLED Display
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-
 #include <queue>
 
+#include "config.h"
+#include "DisplayManager.h"
 #include "Packet.h"
 
 //define the pins used by the LoRa transceiver module
@@ -44,51 +41,37 @@ typedef WebServer WEBServer;
 //915E6 for North America
 #define BAND 915E6
 
-//OLED pins
-#define OLED_SDA 4
-#define OLED_SCL 15
-#define OLED_RST 16
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define RECONNECT_RATE 5 * 1000 // 5 sec
+#define SEND_RATE 30 * 1000		// 30 sec
 
-#define DELAY 30 * 1000 // 30 seg
+// MQTT
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
+// Portal - SmartConfig
+WebServer Server;
+AutoConnect Portal(Server);
+AutoConnectConfig Config;
 
+unsigned long nextReconnectAttempt = 0;
 char id[8];
 unsigned long lastUpdate = 0;
 std::queue<InovaBee::Packet> stack;
 
 void onReceive(int packetSize);
+void brokerConnect();
+void sendData();
+void sendPacket(InovaBee::Packet &packet);
 
 void setup()
 {
-	//reset OLED display via software
-	pinMode(OLED_RST, OUTPUT);
-	digitalWrite(OLED_RST, LOW);
-	delay(20);
-	digitalWrite(OLED_RST, HIGH);
-
-	//initialize OLED
-	Wire.begin(OLED_SDA, OLED_SCL);
-	if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3c, false, false))
-	{ // Address 0x3C for 128x32
-		Serial.println(F("SSD1306 allocation failed"));
-		for (;;)
-			; // Don't proceed, loop forever
-	}
-
-	display.clearDisplay();
-	display.setTextColor(WHITE);
-	display.setTextSize(1);
-	display.setCursor(0, 0);
-	display.print("LORA RECEIVER ");
-	display.display();
+#if DEBUG
+	displaySetup();
 
 	//initialize Serial Monitor
 	Serial.begin(115200);
-
 	Serial.println("LoRa Receiver Test");
+#endif
 
 	//SPI LoRa pins
 	SPI.begin(SCK, MISO, MOSI, SS);
@@ -97,14 +80,18 @@ void setup()
 
 	if (!LoRa.begin(BAND))
 	{
+#if DEBUG
 		Serial.println("Starting LoRa failed!");
-		while (1)
-			;
+#endif
+		// If LoRa was not enabled, we restart
+		ESP.restart();
 	}
+
+#if DEBUG
 	Serial.println("LoRa Initializing OK!");
-	display.setCursor(0, 10);
-	display.println("LoRa Initializing OK!");
-	display.display();
+#endif
+
+	displayShowOK();
 
 	// register the receive callback
 	LoRa.onReceive(onReceive);
@@ -113,6 +100,31 @@ void setup()
 	LoRa.receive();
 
 	lastUpdate = millis();
+
+	// Setup MQTT
+	client.setServer(MQTT_BROKER, MQTT_PORT);
+
+	// Setup Portal
+	Config.title = PORTAL_TITLE;
+	Config.apid = PORTAL_TITLE + WiFi.macAddress();
+	Config.psk = PORTAL_PW;
+	Config.autoReconnect = true;
+	Config.autoReset = true;
+
+	Portal.config(Config);
+
+	if (Portal.begin())
+	{
+#if DEBUG
+		displayShowPortalInfo(true, WiFi.localIP().toString());
+#endif
+	}
+	else
+	{
+#if DEBUG
+		displayShowPortalInfo(false, "error");
+#endif
+	}
 }
 
 void onReceive(int packetSize)
@@ -134,29 +146,99 @@ void onReceive(int packetSize)
 
 		stack.push(pack);
 
+#if DEBUG
 		Serial.println("new msg");
+#endif
 	}
 }
 
 void loop()
 {
+	Portal.handleClient();
+
+	brokerConnect();
+	client.loop();
+
+	if (client.connected())
+	{
+		sendData();
+	}
+}
+
+void sendData()
+{
 	if (lastUpdate < millis())
 	{
+#if DEBUG
 		Serial.print("sending msgs: ");
 		Serial.println(stack.size());
-		
+#endif
+
 		while (stack.empty() == false)
 		{
 			InovaBee::Packet pack = stack.front();
 
+#if DEBUG
 			Serial.println(pack.deviceID);
 			Serial.println(pack.internalTemp);
 			Serial.println(pack.externalTemp);
 			Serial.println(pack.humidity);
+#endif
 
+			sendPacket(pack);
 			stack.pop();
 		}
 
-		lastUpdate = millis() + DELAY;
+		lastUpdate = millis() + SEND_RATE;
 	}
+}
+
+void sendPacket(InovaBee::Packet &packet)
+{
+	const size_t capacity = JSON_ARRAY_SIZE(1) + JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(4);
+	DynamicJsonDocument doc(capacity);
+
+	JsonArray deviceName = doc.createNestedArray(packet.deviceID);
+
+	JsonObject deviceName_0 = deviceName.createNestedObject();
+	deviceName_0["h0"] = packet.humidity;
+	deviceName_0["t0"] = packet.externalTemp;
+	deviceName_0["t1"] = packet.internalTemp;
+
+	String data;
+	serializeJson(doc, data);
+
+#if DEBUG
+	Serial.println(data);
+#endif
+
+	client.publish(DATA_GATEWAY_TOPIC, data.c_str());
+}
+
+void brokerConnect()
+{
+	if (client.connected() || nextReconnectAttempt > millis())
+	{
+		return;
+	}
+
+#if DEBUG
+	Serial.println("Connecting to Broker");
+#endif
+
+	if (client.connect(MQTT_ID, MQTT_USER, NULL))
+	{
+#if DEBUG
+		Serial.println("Connected to Broker");
+#endif
+	}
+	else
+	{
+#if DEBUG
+		Serial.print("Error while connecting to broker: ");
+		Serial.println(client.state());
+#endif
+	}
+
+	nextReconnectAttempt = millis() + RECONNECT_RATE;
 }
